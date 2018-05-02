@@ -170,12 +170,20 @@ namespace NearbySample
 
         void IOnAdvertiseCallback.OnConnectionInitiated(string endpointId, ConnectionInfo connectionInfo)
         {
+            if (connectionInfo.IsIncomingConnection)
+            {
+                NearbyClass.Connections.AcceptConnection(googleApi, endpointId, null);
+            } else
+            {
+
+            }
             Log("OnConnectionInitiated: " + endpointId);
         }
 
         void IOnAdvertiseCallback.OnConnectionResult(string endpointId, ConnectionResolution resolution)
         {
             Log("OnConnectionResult: " + endpointId);
+            
         }
 
         void IOnAdvertiseCallback.OnDisconnected(string endpointId)
