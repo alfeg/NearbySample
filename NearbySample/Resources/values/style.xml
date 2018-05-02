@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<style name="Theme.Custom" parent="@android:style/Theme.DeviceDefault"><item name="android:colorBackground">#ff8bc34a</item><item name="android:windowBackground">?android:attr/colorBackground</item><item name="android:colorPrimary">#ff3d5afe</item><item name="android:colorPrimaryDark">#ff304ffe</item></style>
+</resources>
