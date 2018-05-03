@@ -87,9 +87,14 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="IOnAdvertiseCallback.cs" />
-    <Compile Include="IOnDiscoveryCallback.cs" />
+    <Compile Include="Models\DiscoverItem.cs" />
+    <Compile Include="Core\IConnectionLifeCycleCallback.cs" />
+    <Compile Include="Core\IOnDiscoveryCallback.cs" />
+    <Compile Include="Core\IPayloadCallback.cs" />
     <Compile Include="MainActivity.cs" />
+    <Compile Include="Core\OnConnectionLifecycleCallback.cs" />
+    <Compile Include="Core\OnDiscoveryCallback.cs" />
+    <Compile Include="Core\OnPayloadCallback.cs" />
     <Compile Include="Resources\Resource.Designer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

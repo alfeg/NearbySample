@@ -1,6 +1,6 @@
 ﻿using Android.Gms.Nearby.Connection;
 
-namespace NearbySample
+namespace NearbySample.Core
 {
     public interface IOnDiscoveryCallback
     {

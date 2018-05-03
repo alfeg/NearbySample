@@ -1,12 +1,11 @@
 ﻿using Android.Gms.Nearby.Connection;
 
-namespace NearbySample
+namespace NearbySample.Core
 {
-    public interface IOnAdvertiseCallback
+    public interface IConnectionLifeCycleCallback
     {
         void OnConnectionInitiated(string endpointId, ConnectionInfo connectionInfo);
         void OnConnectionResult(string endpointId, ConnectionResolution resolution);
         void OnDisconnected(string endpointId);
-        void OnEndpointFound(string endpointId, DiscoveredEndpointInfo info);
     }
 }

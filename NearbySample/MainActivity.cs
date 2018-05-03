@@ -7,110 +7,208 @@ using Android.Gms.Nearby.Connection;
 using Android.Widget;
 using Android.OS;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
+using Android;
+using Android.Content.PM;
+using Android.Gms.Tasks;
+using Android.Net;
+using Android.Views;
+using NearbySample.Core;
+using NearbySample.Models;
 
 namespace NearbySample
 {
-    public class DiscoverItem
-    {
-        public string Endpoint { get; set; }
-        public string Name { get; set; }
-
-        public override string ToString() => Name;
-    }
-
     [Activity(Label = "NearbySample", MainLauncher = true, Icon = "@mipmap/icon")]
     public class MainActivity : Activity,
         GoogleApiClient.IConnectionCallbacks,
         GoogleApiClient.IOnConnectionFailedListener,
 
-        IOnAdvertiseCallback, IOnDiscoveryCallback
+        IConnectionLifeCycleCallback, IOnDiscoveryCallback, IPayloadCallback
     {
         private GoogleApiClient googleApi;
-        private TextView log;
         private ListView discoverList;
-        private Button advertise;
         private Switch hostMode;
         private EditText name;
-        private Button discover;
+        private TextView logView;
         private ArrayAdapter<DiscoverItem> discoverListAdapter;
 
-        private bool IsAdvertising = false;
-        private bool IsDiscovering = false;
+        private bool isAdvertising;
+        private bool isDiscovering;
+        private ListView connectedList;
+        private ArrayAdapter<DiscoverItem> connectedListAdapter;
+        private Button selectImage;
 
         private void PrepareUI()
         {
-            this.discover = FindViewById<Button>(Resource.Id.btnDiscover);
-            this.advertise = FindViewById<Button>(Resource.Id.btnAdvertise);
             this.hostMode = FindViewById<Switch>(Resource.Id.hostMode);
             this.name = FindViewById<EditText>(Resource.Id.deviceName);
             name.Text = TryGetDeviceId();
 
             this.discoverList = FindViewById<ListView>(Resource.Id.discoverList);
-            this.discoverListAdapter = new ArrayAdapter<DiscoverItem>(this, Android.Resource.Layout.SimpleListItem1, new List<DiscoverItem>());
+            this.discoverListAdapter = new ArrayAdapter<DiscoverItem>(this, Android.Resource.Layout.SimpleListItem1,
+                new List<DiscoverItem>());
             this.discoverList.Adapter = discoverListAdapter;
+
+            this.connectedList = FindViewById<ListView>(Resource.Id.connectedList);
+            this.connectedListAdapter = new ArrayAdapter<DiscoverItem>(this, Android.Resource.Layout.SimpleListItem1,
+                new List<DiscoverItem>());
+            this.connectedList.Adapter = connectedListAdapter;
+
+            this.selectImage = FindViewById<Button>(Resource.Id.btnImage);
+
+            this.logView = FindViewById<TextView>(Resource.Id.logView);
+            this.progress = FindViewById<ProgressBar>(Resource.Id.uploadProgress);
+            this.progress.Visibility = ViewStates.Gone;
+
+            
         }
 
-        private void UpdateState()
+        private async void UpdateState()
         {
-            this.discover.Enabled = this.googleApi.IsConnected && this.hostMode.Checked == false;
-            this.discover.Visibility = this.hostMode.Checked ? Android.Views.ViewStates.Gone : Android.Views.ViewStates.Visible;
-            this.discover.Text = IsDiscovering ? "Stop Discovering" : "Start Discovering";
-                        
-            this.advertise.Enabled = this.googleApi.IsConnected && this.hostMode.Checked == true;
-            this.advertise.Visibility = !this.hostMode.Checked ? Android.Views.ViewStates.Gone : Android.Views.ViewStates.Visible;
-            this.advertise.Text = IsAdvertising ? "Stop Advertising" : "Start Advertising";
+            await this.apiConnected.Task;
+
+            if (this.IsHostMode)
+            {
+                if (isDiscovering)
+                {
+                    Log("Stop discovery");
+                    NearbyClass.Connections.StopDiscovery(googleApi);
+                    isDiscovering = false;
+                }
+
+                if (!isAdvertising)
+                {
+                    Log("Start advertising...");
+                    await NearbyClass.Connections.StartAdvertisingAsync(googleApi, name.Text, PackageName,
+                        new OnConnectionLifecycleCallback(this),
+                        new AdvertisingOptions(Strategy.P2pStar));
+                    Log("Start advertising. Done");
+                    this.isAdvertising = true;
+                }
+            }
+            else
+            {
+                if (isAdvertising)
+                {
+                    Log("Stop advertising");
+                    NearbyClass.Connections.StopAdvertising(googleApi);
+                    isAdvertising = false;
+                }
+
+                if (!isDiscovering)
+                {
+                    Log("Start discovery...");
+
+                    this.isDiscovering = true;
+                    await NearbyClass.Connections.StartDiscoveryAsync(googleApi, PackageName,
+                        new OnDiscoveryCallback(this),
+                        new DiscoveryOptions(Strategy.P2pStar));
+
+                    Log("Start discovery done");
+                }
+            }
         }
+
+        private bool IsHostMode => this.hostMode.Checked;
 
         private void HandleClicks()
         {
-            this.hostMode.CheckedChange += delegate
-            {
-                this.UpdateState();
-            };
+            this.hostMode.CheckedChange += (sender, e) => this.UpdateState();
 
-            this.discoverList.ItemClick += async (object sender, AdapterView.ItemClickEventArgs e) =>
+            this.discoverList.ItemClick += async (sender, e) =>
             {
                 var item = this.discoverListAdapter.GetItem(e.Position);
 
-                await NearbyClass.Connections.RequestConnectionAsync(this.googleApi,
-                    this.name.Text, item.Endpoint, new OnAdvertiseCallback(this));
+                if (!IsHostMode)
+                {
+                    Log($"Request Connection to {item.Name}[{item.Endpoint}]");
+                    await NearbyClass.Connections.RequestConnectionAsync(this.googleApi,
+                        this.name.Text, item.Endpoint, new OnConnectionLifecycleCallback(this));
+                }
             };
 
-            advertise.Click += delegate
+            this.connectedList.ItemClick += (sender, e) =>
             {
-                if (IsAdvertising)
-                {
-                    NearbyClass.Connections.StopAdvertising(this.googleApi);
-                    IsAdvertising = false;
-                }
-                else
-                {
-                    NearbyClass.Connections.StartAdvertising(googleApi, name.Text, PackageName,
-                        new OnAdvertiseCallback(this),
-                        new AdvertisingOptions(Strategy.P2pStar));
-                    this.IsAdvertising = true;
-                }
-                this.UpdateState();
+                var item = this.connectedListAdapter.GetItem(e.Position);
+                NearbyClass.Connections.DisconnectFromEndpoint(this.googleApi, item.Endpoint);
+                this.connectedListAdapter.Remove(item);
             };
 
-            discover.Click += (sender, args) =>
+            this.selectImage.Click += async (sender, args) =>
             {
-                if (IsDiscovering)
+                if (CheckSelfPermission(Manifest.Permission.ReadExternalStorage) == Permission.Granted)
                 {
-                    NearbyClass.Connections.StopDiscovery(googleApi);
-                    IsDiscovering = false;
+                    var intent = new Intent(Intent.ActionGetContent);
+                    intent.SetType("image/*");
+                    StartActivityForResult(intent, ChooseFileResultCode);
                 }
-                else
-                {
-                    NearbyClass.Connections.StartDiscovery(googleApi, PackageName, new OnDiscoveryCallback(this),
-                        new DiscoveryOptions(Strategy.P2pStar));
-
-                    this.IsDiscovering = true;
-                }
-
-                this.UpdateState();
             };
         }
+
+        
+
+        private void RestoreGoogleApiConnectionIfNeeded()
+        {
+            if (!googleApi.IsConnected)
+            {
+                this.apiConnected = new TaskCompletionSource<bool>();
+                this.googleApi.Connect();
+            }
+        }
+
+        protected override async void OnActivityResult(int requestCode, Result resultCode, Intent data)
+        {
+            RestoreGoogleApiConnectionIfNeeded();
+            
+            if (resultCode == Result.Ok)
+            {
+                if (requestCode == ChooseFileResultCode)
+                {
+                    var payload = CreatePayload(data.Data);
+
+                    if (payload == null) return;
+                    var connected = await this.apiConnected.Task;
+
+                    if (connected)
+                    {
+                        for (int i = 0; i < this.connectedListAdapter.Count; i++)
+                        {
+                            var item = this.connectedListAdapter.GetItem(i);
+                            {
+                                Log($"Sending payload to {item.Name} [{item.Endpoint}]");
+                                this.selectImage.Enabled = false;
+                                await NearbyClass.Connections.SendPayload(this.googleApi, item.Endpoint, payload);
+                                Log($"Done sending payload to {item.Name} [{item.Endpoint}]");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        private long max = 0;
+
+        private Payload CreatePayload(Uri uri)
+        {
+            try
+            {
+                using (var fd = ContentResolver.OpenFileDescriptor(uri, "r"))
+                    this.max = fd.StatSize;
+
+                var inputStream = ContentResolver.OpenInputStream(uri);
+              
+                return Payload.FromStream(inputStream);
+            }
+            catch (System.Exception e)
+            {
+                Log("Cannot read file: " + e.Message);
+                return null;
+            }
+        }
+
+        public const int ChooseFileResultCode = 1000;
 
         protected override void OnCreate(Bundle savedInstanceState)
         {
@@ -132,35 +230,45 @@ namespace NearbySample
 
         protected override void OnStart()
         {
-            base.OnStart();
             Log("onStart");
-            googleApi.Connect();
+            if (!googleApi.IsConnected && !googleApi.IsConnecting)
+            {
+                RestoreGoogleApiConnectionIfNeeded();
+            }
+
+            base.OnStart();
         }
 
-        private const string TAG = "NEARBY";
+        private const string Tag = "NEARBY";
 
         private void Log(string msg)
         {
-            Android.Util.Log.Debug(TAG, msg);
-            log?.Append("\n" + msg);
+            Android.Util.Log.Debug(Tag, msg);
+            this.logView.Append("\n" + msg);
         }
 
         protected override void OnStop()
         {
-            base.OnStop();
+            //this.apiConnected = null;
             Log("onStop");
 
             // Disconnect the Google API client and stop any ongoing discovery or advertising. When the
             // GoogleAPIClient is disconnected, any connected peers will get an onDisconnected callback.
-            googleApi?.Disconnect();
+            //googleApi?.Disconnect();
+            base.OnStop();
         }
 
         private static string TryGetDeviceId()
         {
             try
             {
-                return Android.Provider.Settings.Secure.GetString(Application.Context.ContentResolver,
-                    Android.Provider.Settings.Secure.AndroidId);
+                var model = Build.Model;
+                var bluetoothName = Android.Provider.Settings.Secure.GetString(
+                    Application.Context.ContentResolver, "bluetooth_name");
+
+                return model.ToLower() != bluetoothName.ToLower()
+                    ? $"{model} {bluetoothName}"
+                    : bluetoothName;
             }
             catch
             {
@@ -168,26 +276,87 @@ namespace NearbySample
             }
         }
 
-        void IOnAdvertiseCallback.OnConnectionInitiated(string endpointId, ConnectionInfo connectionInfo)
+        void IConnectionLifeCycleCallback.OnConnectionInitiated(string endpointId, ConnectionInfo connectionInfo)
         {
+            // At this moment we can ask user consent on connection. 
+            // There is `connectionInfo.AuthenticationToken` that can be displayed to each user
+            // to authenticate connection
+            // in this sample we just accept connection by both sides without consent
+
             if (connectionInfo.IsIncomingConnection)
             {
-                NearbyClass.Connections.AcceptConnection(googleApi, endpointId, null);
-            } else
+                NearbyClass.Connections.AcceptConnection(googleApi, endpointId, new OnPayloadCallback(this));
+                this.discoverListAdapter.Add(new DiscoverItem
+                {
+                    Endpoint = endpointId,
+                    Name = connectionInfo.EndpointName
+                });
+            }
+            else
             {
+                NearbyClass.Connections.AcceptConnection(googleApi, endpointId, new OnPayloadCallback(this));
+            }
+
+            Log($"On Connection initiated {(connectionInfo.IsIncomingConnection ? "from" : "to")} {connectionInfo.EndpointName}[{endpointId}] Auth:{connectionInfo.AuthenticationToken}");
+        }
+
+        void IConnectionLifeCycleCallback.OnConnectionResult(string endpointId, ConnectionResolution resolution)
+        {
+            if (resolution.Status.IsSuccess)
+            {
+                var item = FindItem(this.discoverListAdapter, endpointId);
+                if (item != null)
+                {
+                    Log($"Connected to {item.Name} [{item.Endpoint}]");
+
+                    item.Connected = true;
+                    discoverListAdapter.NotifyDataSetChanged();
+                    this.connectedListAdapter.Add(item);
+
+                    if (IsHostMode)
+                    {
+                        this.discoverListAdapter.Remove(item);
+                    }
+                }
 
             }
-            Log("OnConnectionInitiated: " + endpointId);
+            else
+            {
+                Log("OnConnectionResult: " + endpointId + " failed " + resolution.Status.StatusMessage);
+            }
         }
 
-        void IOnAdvertiseCallback.OnConnectionResult(string endpointId, ConnectionResolution resolution)
+        DiscoverItem FindItem(ArrayAdapter<DiscoverItem> items, string endpointId)
         {
-            Log("OnConnectionResult: " + endpointId);
-            
+            for (int i = 0; i < items.Count; i++)
+            {
+                var item = items.GetItem(i);
+
+                if (item.Endpoint == endpointId)
+                {
+                    return item;
+                }
+            }
+
+            return null;
         }
 
-        void IOnAdvertiseCallback.OnDisconnected(string endpointId)
+        void IConnectionLifeCycleCallback.OnDisconnected(string endpointId)
         {
+            var connectedItem = FindItem(this.connectedListAdapter, endpointId);
+            if (connectedItem != null)
+            {
+                this.connectedListAdapter.Remove(connectedItem);
+            }
+
+            var discoverItem = FindItem(this.discoverListAdapter, endpointId);
+            if (discoverItem != null)
+            {
+
+                discoverItem.Connected = false;
+                this.discoverListAdapter.NotifyDataSetChanged();
+            }
+
             Log("OnDisconnected: " + endpointId);
         }
 
@@ -195,80 +364,102 @@ namespace NearbySample
         {
             Log("OnEndpointFound: " + endpointId + ". " + info.EndpointName);
 
-            this.discoverListAdapter.Add(new DiscoverItem
-            {
-                Endpoint = endpointId,
-                Name = info.EndpointName
-            });
+            var existing = FindItem(this.discoverListAdapter, endpointId);
+
+            if (existing == null)
+                this.discoverListAdapter.Add(new DiscoverItem
+                {
+                    Endpoint = endpointId,
+                    Name = info.EndpointName
+                });
         }
 
-        public void OnEndpointLost(string endpointId)
+        void IOnDiscoveryCallback.OnEndpointLost(string endpointId)
         {
             Log("OnEndpointLost:" + endpointId);
+
+            var item = FindItem(this.discoverListAdapter, endpointId);
+
+            if (item != null)
+                this.discoverListAdapter.Remove(item);
         }
 
-        public void OnConnected(Bundle connectionHint)
+        private TaskCompletionSource<bool> apiConnected = new TaskCompletionSource<bool>();
+        private ProgressBar progress;
+
+        void GoogleApiClient.IConnectionCallbacks.OnConnected(Bundle connectionHint)
         {
             Log("On api connected");
-            this.discover.Enabled = true;
-            this.advertise.Enabled = true;
+            apiConnected.SetResult(true);
+            UpdateState();
         }
 
-        public void OnConnectionSuspended(int cause)
+        void GoogleApiClient.IConnectionCallbacks.OnConnectionSuspended(int cause)
         {
             Log("On api suspended");
-            this.discover.Enabled = false;
-            this.advertise.Enabled = false;
         }
 
         public void OnConnectionFailed(ConnectionResult result)
         {
             Log("On api connection failed. " + result.ErrorMessage);
         }
-    }
 
-    public class OnDiscoveryCallback : EndpointDiscoveryCallback
-    {
-        private readonly IOnDiscoveryCallback _callback;
-
-        public OnDiscoveryCallback(IOnDiscoveryCallback callback)
+        void IPayloadCallback.OnPayloadReceived(string endpointId, Payload payload)
         {
-            _callback = callback;
+            if (payload.PayloadType == Payload.Type.Bytes)
+            {
+                var bytes = payload.AsBytes();
+
+                Log($"OnPayloadReceived: {endpointId} - {payload.Id} {payload.PayloadType} {bytes?.LongLength ?? -1}");
+            }
+
+            if (payload.PayloadType == Payload.Type.Stream)
+            {
+                Log($"OnPayloadReceived: {endpointId} - {payload.Id} Stream ");
+                var stream = payload.AsStream();
+
+                var path = $"{Environment.ExternalStorageDirectory}/{PackageName}/file.jpg";
+                var f = new Java.IO.File(path);
+                var dirs = new Java.IO.File(f.Parent);
+                if (!dirs.Exists())
+                    dirs.Mkdirs();
+
+                f.CreateNewFile();
+                Log("OnPayloadReceived: Reading stream, writing to " + path);
+                using (var result = new FileStream(f.ToString(), FileMode.OpenOrCreate))
+                {
+                    stream.AsInputStream().CopyTo(result);
+                }
+
+                var intent = new Intent();
+                intent.SetAction(Intent.ActionView);
+                intent.SetDataAndType(Uri.Parse("file://" + path), "image/*");
+                StartActivity(intent);
+            }
         }
 
-        public override void OnEndpointFound(string endpointId, DiscoveredEndpointInfo info)
+        void IPayloadCallback.OnPayloadTransferUpdate(string endpointId, PayloadTransferUpdate update)
         {
-            _callback.OnEndpointFound(endpointId, info);
-        }
-
-        public override void OnEndpointLost(string endpointId)
-        {
-            _callback.OnEndpointLost(endpointId);
-        }
-    }
-
-    public class OnAdvertiseCallback : ConnectionLifecycleCallback
-    {
-        private readonly IOnAdvertiseCallback _callback;
-
-        public OnAdvertiseCallback(IOnAdvertiseCallback callback)
-        {
-            _callback = callback;
-        }
-
-        public override void OnConnectionInitiated(string endpointId, ConnectionInfo connectionInfo)
-        {
-            _callback.OnConnectionInitiated(endpointId, connectionInfo);
-        }
-
-        public override void OnConnectionResult(string endpointId, ConnectionResolution resolution)
-        {
-            _callback.OnConnectionResult(endpointId, resolution);
-        }
-
-        public override void OnDisconnected(string endpointId)
-        {
-            _callback.OnDisconnected(endpointId);
+            switch (update.TransferStatus)
+            {
+                case PayloadTransferUpdate.Status.InProgress:
+                    this.selectImage.Enabled = false;
+                    this.progress.Visibility = ViewStates.Visible;
+                    this.progress.Max = 10000;
+  
+                    this.progress.Progress = (int) ((double)update.BytesTransferred / (double)max * 10000);
+                    break;
+                case PayloadTransferUpdate.Status.Failure:
+                    Log($"OnPayloadTransferUpdate: {endpointId} Failure - {update.TransferStatus} {update.BytesTransferred} of {update.TotalBytes}");
+                    this.selectImage.Enabled = true;
+                    this.progress.Visibility = ViewStates.Gone;
+                    break;
+                case PayloadTransferUpdate.Status.Success:
+                    this.selectImage.Enabled = true;
+                    this.progress.Visibility = ViewStates.Gone;
+                    Log($"OnPayloadTransferUpdate: {endpointId} Succes - {update.TransferStatus} {update.BytesTransferred} of {update.TotalBytes}");
+                     break;
+            }
         }
     }
 }
