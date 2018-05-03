@@ -1,4 +1,5 @@
-﻿using Android.App;
+﻿using System;
+using Android.App;
 using Android.Content;
 using Android.Gms.Common;
 using Android.Gms.Common.Apis;
@@ -13,13 +14,34 @@ using System.Threading.Tasks;
 using Android;
 using Android.Content.PM;
 using Android.Gms.Tasks;
-using Android.Net;
 using Android.Views;
 using NearbySample.Core;
 using NearbySample.Models;
+using Environment = Android.OS.Environment;
+using Task = System.Threading.Tasks.Task;
+using Uri = Android.Net.Uri;
 
 namespace NearbySample
 {
+    public static class ArrayAdapterHelper
+    {
+        public static T Find<T>(this ArrayAdapter<T> adapter, Func<T, bool> predicat)
+            where  T: class
+        {
+            for (int i = 0; i < adapter.Count; i++)
+            {
+                var item = adapter.GetItem(i);
+
+                if (predicat(item))
+                {
+                    return item;
+                }
+            }
+
+            return null;
+        }
+    }
+
     [Activity(Label = "NearbySample", MainLauncher = true, Icon = "@mipmap/icon")]
     public class MainActivity : Activity,
         GoogleApiClient.IConnectionCallbacks,
@@ -61,8 +83,6 @@ namespace NearbySample
             this.logView = FindViewById<TextView>(Resource.Id.logView);
             this.progress = FindViewById<ProgressBar>(Resource.Id.uploadProgress);
             this.progress.Visibility = ViewStates.Gone;
-
-            
         }
 
         private async void UpdateState()
@@ -87,6 +107,8 @@ namespace NearbySample
                     Log("Start advertising. Done");
                     this.isAdvertising = true;
                 }
+
+                selectImage.Visibility = ViewStates.Gone;
             }
             else
             {
@@ -108,6 +130,8 @@ namespace NearbySample
 
                     Log("Start discovery done");
                 }
+
+                selectImage.Visibility = ViewStates.Visible;
             }
         }
 
@@ -133,6 +157,12 @@ namespace NearbySample
             {
                 var item = this.connectedListAdapter.GetItem(e.Position);
                 NearbyClass.Connections.DisconnectFromEndpoint(this.googleApi, item.Endpoint);
+
+                if (!IsHostMode)
+                {
+                    this.discoverListAdapter.Add(item);
+                }
+
                 this.connectedListAdapter.Remove(item);
             };
 
@@ -147,7 +177,6 @@ namespace NearbySample
             };
         }
 
-        
 
         private void RestoreGoogleApiConnectionIfNeeded()
         {
@@ -225,6 +254,9 @@ namespace NearbySample
 
             this.PrepareUI();
             this.HandleClicks();
+
+            this.logView.Append("Debug logs:\n\n");
+
             this.UpdateState();
         }
 
@@ -304,57 +336,30 @@ namespace NearbySample
         {
             if (resolution.Status.IsSuccess)
             {
-                var item = FindItem(this.discoverListAdapter, endpointId);
+                var item = this.discoverListAdapter.Find(d => d.Endpoint == endpointId);
                 if (item != null)
                 {
                     Log($"Connected to {item.Name} [{item.Endpoint}]");
 
-                    item.Connected = true;
-                    discoverListAdapter.NotifyDataSetChanged();
                     this.connectedListAdapter.Add(item);
-
-                    if (IsHostMode)
-                    {
-                        this.discoverListAdapter.Remove(item);
-                    }
+                    this.discoverListAdapter.Remove(item);
                 }
-
             }
             else
             {
                 Log("OnConnectionResult: " + endpointId + " failed " + resolution.Status.StatusMessage);
             }
         }
-
-        DiscoverItem FindItem(ArrayAdapter<DiscoverItem> items, string endpointId)
-        {
-            for (int i = 0; i < items.Count; i++)
-            {
-                var item = items.GetItem(i);
-
-                if (item.Endpoint == endpointId)
-                {
-                    return item;
-                }
-            }
-
-            return null;
-        }
-
+        
         void IConnectionLifeCycleCallback.OnDisconnected(string endpointId)
         {
-            var connectedItem = FindItem(this.connectedListAdapter, endpointId);
+            var connectedItem = this.connectedListAdapter.Find(d => d.Endpoint == endpointId);
             if (connectedItem != null)
             {
                 this.connectedListAdapter.Remove(connectedItem);
-            }
 
-            var discoverItem = FindItem(this.discoverListAdapter, endpointId);
-            if (discoverItem != null)
-            {
-
-                discoverItem.Connected = false;
-                this.discoverListAdapter.NotifyDataSetChanged();
+                if(IsHostMode == false)
+                    this.discoverListAdapter.Add(connectedItem);
             }
 
             Log("OnDisconnected: " + endpointId);
@@ -364,7 +369,7 @@ namespace NearbySample
         {
             Log("OnEndpointFound: " + endpointId + ". " + info.EndpointName);
 
-            var existing = FindItem(this.discoverListAdapter, endpointId);
+            var existing = this.discoverListAdapter.Find(d => d.Endpoint == endpointId);
 
             if (existing == null)
                 this.discoverListAdapter.Add(new DiscoverItem
@@ -378,10 +383,16 @@ namespace NearbySample
         {
             Log("OnEndpointLost:" + endpointId);
 
-            var item = FindItem(this.discoverListAdapter, endpointId);
+            var item = this.discoverListAdapter.Find(d => d.Endpoint == endpointId);
 
             if (item != null)
                 this.discoverListAdapter.Remove(item);
+
+            var connected = this.connectedListAdapter.Find(d => d.Endpoint == endpointId);
+            if (connected != null)
+            {
+                this.connectedListAdapter.Remove(connected);
+            }
         }
 
         private TaskCompletionSource<bool> apiConnected = new TaskCompletionSource<bool>();
