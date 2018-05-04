@@ -83,8 +83,9 @@ namespace NearbySample
             if (!isGoogleApiAvailable)
             {
                 this.Log($"Google Api Services is not available");
-
-                Dialog dialog = GoogleApiAvailability.Instance.GetErrorDialog(this, GoogleApiAvailability.Instance.IsGooglePlayServicesAvailable(this), 1);
+                Dialog dialog = GoogleApiAvailability.Instance.GetErrorDialog(this,
+                    GoogleApiAvailability.Instance.IsGooglePlayServicesAvailable(this), 1);
+                this.Log($"If no Google Account available, then Google Api Services can be downloaded here: https://www.apkmonk.com/app/com.google.android.gms/");
                 dialog.Show();
             }
             
@@ -167,7 +168,7 @@ namespace NearbySample
 
                 if (!isDiscovering)
                 {
-                    Log("Start discovery...");
+                    Log("Start discovery...(wait for done message)");
 
                     this.isDiscovering = true;
                     await NearbyClass.Connections.StartDiscoveryAsync(googleApi, PackageName,

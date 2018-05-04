@@ -76,6 +76,7 @@
             android:layout_weight="0.2">
             <TextView
                 android:id="@+id/logView"
+                android:autoLink="web"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
         </ScrollView>
