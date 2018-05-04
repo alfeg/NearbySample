@@ -9,16 +9,11 @@ using Android.Widget;
 using Android.OS;
 using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Threading.Tasks;
-using Android;
-using Android.Content.PM;
-using Android.Gms.Tasks;
 using Android.Views;
 using NearbySample.Core;
 using NearbySample.Models;
 using Environment = Android.OS.Environment;
-using Task = System.Threading.Tasks.Task;
 using Uri = Android.Net.Uri;
 
 namespace NearbySample
@@ -42,6 +37,7 @@ namespace NearbySample
         }
     }
 
+
     [Activity(Label = "NearbySample", MainLauncher = true, Icon = "@mipmap/icon")]
     public class MainActivity : Activity,
         GoogleApiClient.IConnectionCallbacks,
@@ -58,9 +54,52 @@ namespace NearbySample
 
         private bool isAdvertising;
         private bool isDiscovering;
+        private bool isGoogleApiAvailable = true;
         private ListView connectedList;
         private ArrayAdapter<DiscoverItem> connectedListAdapter;
         private Button selectImage;
+
+        protected override void OnCreate(Bundle savedInstanceState)
+        {
+            base.OnCreate(savedInstanceState);
+
+            this.googleApi = new GoogleApiClient.Builder(this)
+                .AddConnectionCallbacks(this)
+                .AddOnConnectionFailedListener(this)
+                .AddApi(NearbyClass.CONNECTIONS_API)
+                .Build();
+
+            // Set our view from the "main" layout resource
+            SetContentView(Resource.Layout.main);
+
+            this.PrepareUI();
+            this.HandleClicks();
+
+            this.logView.Append("Debug logs:\n\n");
+
+            this.isGoogleApiAvailable = GoogleApiAvailability.Instance.IsGooglePlayServicesAvailable(this) ==
+                                        ConnectionResult.Success;
+
+            if (!isGoogleApiAvailable)
+            {
+                this.Log($"Google Api Services is not available");
+
+                Dialog dialog = GoogleApiAvailability.Instance.GetErrorDialog(this, GoogleApiAvailability.Instance.IsGooglePlayServicesAvailable(this), 1);
+                dialog.Show();
+            }
+            
+            this.Log($"Google Api Services is available");
+            this.Log($"Version: {GoogleApiAvailability.GooglePlayServicesVersionCode}");
+
+            this.UpdateState();
+        }
+
+        protected override void OnDestroy()
+        {
+            if(this.googleApi?.IsConnected == true)
+                this.googleApi?.Disconnect();
+            base.OnDestroy();
+        }
 
         private void PrepareUI()
         {
@@ -69,13 +108,15 @@ namespace NearbySample
             name.Text = TryGetDeviceId();
 
             this.discoverList = FindViewById<ListView>(Resource.Id.discoverList);
-            this.discoverListAdapter = new ArrayAdapter<DiscoverItem>(this, Android.Resource.Layout.SimpleListItem1,
+            this.discoverListAdapter = new ArrayAdapter<DiscoverItem>(this,
+                Android.Resource.Layout.SimpleListItem1,
                 new List<DiscoverItem>());
+
             this.discoverList.Adapter = discoverListAdapter;
 
             this.connectedList = FindViewById<ListView>(Resource.Id.connectedList);
-            this.connectedListAdapter = new ArrayAdapter<DiscoverItem>(this, Android.Resource.Layout.SimpleListItem1,
-                new List<DiscoverItem>());
+            this.connectedListAdapter = new ArrayAdapter<DiscoverItem>(this,
+                Android.Resource.Layout.SimpleListItem1, new List<DiscoverItem>());
             this.connectedList.Adapter = connectedListAdapter;
 
             this.selectImage = FindViewById<Button>(Resource.Id.btnImage);
@@ -87,13 +128,18 @@ namespace NearbySample
 
         private async void UpdateState()
         {
+            if (!isGoogleApiAvailable)
+            {
+                return;
+            }
+
             await this.apiConnected.Task;
 
             if (this.IsHostMode)
             {
                 if (isDiscovering)
                 {
-                    Log("Stop discovery");
+                    Log("Stop discovery mode");
                     NearbyClass.Connections.StopDiscovery(googleApi);
                     isDiscovering = false;
                 }
@@ -114,7 +160,7 @@ namespace NearbySample
             {
                 if (isAdvertising)
                 {
-                    Log("Stop advertising");
+                    Log("Stop advertising mode");
                     NearbyClass.Connections.StopAdvertising(googleApi);
                     isAdvertising = false;
                 }
@@ -168,12 +214,9 @@ namespace NearbySample
 
             this.selectImage.Click += async (sender, args) =>
             {
-                if (CheckSelfPermission(Manifest.Permission.ReadExternalStorage) == Permission.Granted)
-                {
-                    var intent = new Intent(Intent.ActionGetContent);
-                    intent.SetType("image/*");
-                    StartActivityForResult(intent, ChooseFileResultCode);
-                }
+                var intent = new Intent(Intent.ActionGetContent);
+                intent.SetType("image/*");
+                StartActivityForResult(intent, ChooseFileResultCode);
             };
         }
 
@@ -190,7 +233,7 @@ namespace NearbySample
         protected override async void OnActivityResult(int requestCode, Result resultCode, Intent data)
         {
             RestoreGoogleApiConnectionIfNeeded();
-            
+
             if (resultCode == Result.Ok)
             {
                 if (requestCode == ChooseFileResultCode)
@@ -227,7 +270,7 @@ namespace NearbySample
                     this.max = fd.StatSize;
 
                 var inputStream = ContentResolver.OpenInputStream(uri);
-              
+
                 return Payload.FromStream(inputStream);
             }
             catch (System.Exception e)
@@ -239,26 +282,6 @@ namespace NearbySample
 
         public const int ChooseFileResultCode = 1000;
 
-        protected override void OnCreate(Bundle savedInstanceState)
-        {
-            base.OnCreate(savedInstanceState);
-
-            this.googleApi = new GoogleApiClient.Builder(this)
-                .AddConnectionCallbacks(this)
-                .AddOnConnectionFailedListener(this)
-                .AddApi(NearbyClass.CONNECTIONS_API)
-                .Build();
-
-            // Set our view from the "main" layout resource
-            SetContentView(Resource.Layout.main);
-
-            this.PrepareUI();
-            this.HandleClicks();
-
-            this.logView.Append("Debug logs:\n\n");
-
-            this.UpdateState();
-        }
 
         protected override void OnStart()
         {
@@ -350,7 +373,7 @@ namespace NearbySample
                 Log("OnConnectionResult: " + endpointId + " failed " + resolution.Status.StatusMessage);
             }
         }
-        
+
         void IConnectionLifeCycleCallback.OnDisconnected(string endpointId)
         {
             var connectedItem = this.connectedListAdapter.Find(d => d.Endpoint == endpointId);
@@ -358,7 +381,7 @@ namespace NearbySample
             {
                 this.connectedListAdapter.Remove(connectedItem);
 
-                if(IsHostMode == false)
+                if (IsHostMode == false)
                     this.discoverListAdapter.Add(connectedItem);
             }
 
@@ -400,19 +423,21 @@ namespace NearbySample
 
         void GoogleApiClient.IConnectionCallbacks.OnConnected(Bundle connectionHint)
         {
-            Log("On api connected");
+            Log("Google Services Api connected");
             apiConnected.SetResult(true);
             UpdateState();
         }
 
         void GoogleApiClient.IConnectionCallbacks.OnConnectionSuspended(int cause)
         {
-            Log("On api suspended");
+            Log("Google Services Api suspended");
         }
 
         public void OnConnectionFailed(ConnectionResult result)
         {
-            Log("On api connection failed. " + result.ErrorMessage);
+            Log($"Google Services Api connection failed. {result.ErrorCode} {result.HasResolution} {result.ErrorMessage}");
+            
+            RestoreGoogleApiConnectionIfNeeded();
         }
 
         void IPayloadCallback.OnPayloadReceived(string endpointId, Payload payload)
@@ -457,8 +482,8 @@ namespace NearbySample
                     this.selectImage.Enabled = false;
                     this.progress.Visibility = ViewStates.Visible;
                     this.progress.Max = 10000;
-  
-                    this.progress.Progress = (int) ((double)update.BytesTransferred / (double)max * 10000);
+
+                    this.progress.Progress = (int)((double)update.BytesTransferred / (double)max * 10000);
                     break;
                 case PayloadTransferUpdate.Status.Failure:
                     Log($"OnPayloadTransferUpdate: {endpointId} Failure - {update.TransferStatus} {update.BytesTransferred} of {update.TotalBytes}");
@@ -469,7 +494,7 @@ namespace NearbySample
                     this.selectImage.Enabled = true;
                     this.progress.Visibility = ViewStates.Gone;
                     Log($"OnPayloadTransferUpdate: {endpointId} Succes - {update.TransferStatus} {update.BytesTransferred} of {update.TotalBytes}");
-                     break;
+                    break;
             }
         }
     }
