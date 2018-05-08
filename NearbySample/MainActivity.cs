@@ -455,7 +455,7 @@ namespace NearbySample
                 Log($"OnPayloadReceived: {endpointId} - {payload.Id} Stream ");
                 var stream = payload.AsStream();
 
-                var path = $"{Environment.ExternalStorageDirectory}/{PackageName}/file.jpg";
+                var path = $"{Environment.ExternalStorageDirectory}/{PackageName}/file_{endpointId}_{payload.Id}.jpg";
                 var f = new Java.IO.File(path);
                 var dirs = new Java.IO.File(f.Parent);
                 if (!dirs.Exists())
